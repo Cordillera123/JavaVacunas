@@ -384,6 +384,32 @@ public class EsquemaVacunacion {
                 this.edadAplicacionDias != null && this.edadAplicacionDias >= 0 &&
                 this.descripcionEdad != null && !this.descripcionEdad.trim().isEmpty();
     }
+    /**
+     * Obtiene la edad en meses calculada desde días
+     * @return Integer con la edad en meses (aproximado)
+     */
+    public Integer getEdadMeses() {
+        if (this.edadAplicacionDias == null) {
+            return null;
+        }
+        return this.edadAplicacionDias / 30; // Aproximación: 30 días = 1 mes
+    }
+
+    /**
+     * Verifica si la vacuna es obligatoria según el esquema nacional
+     * @return true - todas las vacunas del esquema son obligatorias por defecto
+     */
+    public Boolean getObligatoria() {
+        return true; // En el esquema nacional ecuatoriano, todas son obligatorias
+    }
+
+    /**
+     * Alias para getObligatoria para compatibilidad
+     * @return true si es obligatoria
+     */
+    public Boolean getEsObligatoria() {
+        return getObligatoria();
+    }
 
     /**
      * Obtiene los mensajes de validación

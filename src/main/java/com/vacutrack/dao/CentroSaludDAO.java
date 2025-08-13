@@ -530,4 +530,19 @@ public class CentroSaludDAO extends BaseDAO<CentroSalud, Integer> {
         Object result = executeScalar(sql, nombre.trim(), excludeId);
         return result != null;
     }
+
+    /**
+     * Busca centros por municipio (usando el campo sector como aproximación)
+     * @param municipio municipio del centro de salud
+     * @return lista de centros del municipio/sector especificado
+     */
+    public List<CentroSalud> findByMunicipio(String municipio) {
+        if (municipio == null || municipio.trim().isEmpty()) {
+            return List.of();
+        }
+
+        // En el modelo actual, usamos el campo 'sector' como municipio
+        // para simplificar y mantener compatibilidad
+        return findBySector(municipio);
+    }
 }

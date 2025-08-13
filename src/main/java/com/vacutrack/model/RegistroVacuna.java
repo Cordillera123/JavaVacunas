@@ -557,6 +557,48 @@ public class RegistroVacuna {
         return resumen.toString();
     }
 
+    /**
+     * Establece el lote de la vacuna (alias para setLoteVacuna)
+     * @param lote lote de la vacuna
+     */
+    public void setLote(String lote) {
+        setLoteVacuna(lote);
+    }
+
+    /**
+     * Obtiene el lote de la vacuna (alias para getLoteVacuna)
+     * @return lote de la vacuna
+     */
+    public String getLote() {
+        return getLoteVacuna();
+    }
+
+    /**
+     * Establece si el registro está activo (método de compatibilidad)
+     * En este modelo, todos los registros están activos por defecto
+     * @param activo true si está activo (ignorado en esta implementación)
+     */
+    public void setActivo(Boolean activo) {
+        // No hacer nada - el modelo actual no tiene campo activo
+        // Se mantiene para compatibilidad con el servicio
+    }
+
+    /**
+     * Verifica si el registro está activo (método de compatibilidad)
+     * @return true - todos los registros están activos en este modelo
+     */
+    public Boolean getActivo() {
+        return true; // Por defecto, todos los registros están activos
+    }
+
+    /**
+     * Verifica si el registro está activo (método de conveniencia)
+     * @return true - todos los registros están activos en este modelo
+     */
+    public boolean estaActivo() {
+        return true;
+    }
+
     // Métodos para validación
 
     /**
