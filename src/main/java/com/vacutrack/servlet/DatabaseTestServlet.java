@@ -22,7 +22,7 @@ import java.util.List;
  */
 @WebServlet("/database-test")
 public class DatabaseTestServlet extends HttpServlet {
-    
+
     private UsuarioDAO usuarioDAO;
     private PadreFamiliaDAO padreFamiliaDAO;
     private ProfesionalEnfermeriaDAO profesionalDAO;

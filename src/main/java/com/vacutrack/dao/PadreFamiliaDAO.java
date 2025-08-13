@@ -466,19 +466,18 @@ public class PadreFamiliaDAO extends BaseDAO<PadreFamilia, Integer> {
      * @return String con estadísticas por mes
      */
     // Reemplazar getRegistrationStatistics() con query más portable:
+    // ✅ CORRECCIÓN: Usar concatenación tradicional compatible con Java 11
     public String getRegistrationStatistics() {
-        String sql = """
-        SELECT 
-            YEAR(fecha_creacion) as anio,
-            MONTH(fecha_creacion) as mes,
-            COUNT(*) as total
-        FROM padres_familia pf
-        INNER JOIN usuarios u ON pf.usuario_id = u.id
-        WHERE u.activo = true
-        AND fecha_creacion >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
-        GROUP BY YEAR(fecha_creacion), MONTH(fecha_creacion)
-        ORDER BY anio DESC, mes DESC
-        """;
+        String sql = "SELECT " +
+                "YEAR(fecha_creacion) as anio, " +
+                "MONTH(fecha_creacion) as mes, " +
+                "COUNT(*) as total " +
+                "FROM padres_familia pf " +
+                "INNER JOIN usuarios u ON pf.usuario_id = u.id " +
+                "WHERE u.activo = true " +
+                "AND fecha_creacion >= DATE_SUB(NOW(), INTERVAL 12 MONTH) " +
+                "GROUP BY YEAR(fecha_creacion), MONTH(fecha_creacion) " +
+                "ORDER BY anio DESC, mes DESC";
 
         StringBuilder stats = new StringBuilder();
         stats.append("Registros de Padres por Mes (Últimos 12 meses):\n");

@@ -111,6 +111,52 @@ public class TipoUsuarioDAO extends BaseDAO<TipoUsuario, Integer> {
             tipoUsuario.setId(generatedKeys.getInt(1));
         }
     }
+    // ✅ AGREGAR después de assignGeneratedId:
+    public boolean validateForSave(TipoUsuario tipoUsuario) {
+        if (tipoUsuario == null) {
+            return false;
+        }
+
+        if (!tipoUsuario.esValido()) {
+            logger.warn("Datos del tipo de usuario no válidos: {}", tipoUsuario.obtenerMensajesValidacion());
+            return false;
+        }
+
+        // Validar unicidad de nombre
+        if (tipoUsuario.getNombre() != null) {
+            if (tipoUsuario.getId() == null) {
+                // Nuevo registro
+                if (existsByName(tipoUsuario.getNombre())) {
+                    logger.warn("El nombre {} ya está registrado", tipoUsuario.getNombre());
+                    return false;
+                }
+            } else {
+                // Actualización
+                if (existsByNameExcluding(tipoUsuario.getNombre(), tipoUsuario.getId())) {
+                    logger.warn("El nombre {} ya está registrado en otro tipo de usuario", tipoUsuario.getNombre());
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    @Override
+    public boolean save(TipoUsuario tipoUsuario) {
+        if (!validateForSave(tipoUsuario)) {
+            return false;
+        }
+        return super.save(tipoUsuario);
+    }
+
+    @Override
+    public boolean update(TipoUsuario tipoUsuario) {
+        if (!validateForSave(tipoUsuario)) {
+            return false;
+        }
+        return super.update(tipoUsuario);
+    }
 
     // Métodos específicos
 
@@ -231,22 +277,26 @@ public class TipoUsuarioDAO extends BaseDAO<TipoUsuario, Integer> {
             // Verificar y crear Padre de Familia
             if (!existsByName(TipoUsuario.PADRE_FAMILIA)) {
                 TipoUsuario padreFamilia = TipoUsuario.crearPadreFamilia();
-                insert(padreFamilia);
-                logger.info("Tipo de usuario '{}' creado", TipoUsuario.PADRE_FAMILIA);
+                // ✅ CAMBIAR: Usar save() en lugar de insert()
+                if (save(padreFamilia)) {
+                    logger.info("Tipo de usuario '{}' creado", TipoUsuario.PADRE_FAMILIA);
+                }
             }
 
             // Verificar y crear Profesional de Enfermería
             if (!existsByName(TipoUsuario.PROFESIONAL_ENFERMERIA)) {
                 TipoUsuario profesional = TipoUsuario.crearProfesionalEnfermeria();
-                insert(profesional);
-                logger.info("Tipo de usuario '{}' creado", TipoUsuario.PROFESIONAL_ENFERMERIA);
+                if (save(profesional)) {
+                    logger.info("Tipo de usuario '{}' creado", TipoUsuario.PROFESIONAL_ENFERMERIA);
+                }
             }
 
             // Verificar y crear Administrador
             if (!existsByName(TipoUsuario.ADMINISTRADOR)) {
                 TipoUsuario administrador = TipoUsuario.crearAdministrador();
-                insert(administrador);
-                logger.info("Tipo de usuario '{}' creado", TipoUsuario.ADMINISTRADOR);
+                if (save(administrador)) {
+                    logger.info("Tipo de usuario '{}' creado", TipoUsuario.ADMINISTRADOR);
+                }
             }
 
             logger.info("Inicialización de tipos de usuario completada");
@@ -256,7 +306,6 @@ public class TipoUsuarioDAO extends BaseDAO<TipoUsuario, Integer> {
             throw new RuntimeException("Error al inicializar tipos de usuario", e);
         }
     }
-
     /**
      * Desactiva un tipo de usuario (no se puede eliminar porque puede tener usuarios asociados)
      * @param id ID del tipo de usuario
@@ -268,7 +317,7 @@ public class TipoUsuarioDAO extends BaseDAO<TipoUsuario, Integer> {
         }
 
         // Verificar que no sea un tipo de sistema crítico
-        Optional<TipoUsuario> tipoOpt = Optional.ofNullable(findById(id));
+        Optional<TipoUsuario> tipoOpt = findById(id);
         if (tipoOpt.isPresent()) {
             String nombre = tipoOpt.get().getNombre();
             if (TipoUsuario.ADMINISTRADOR.equals(nombre)) {
@@ -361,5 +410,11 @@ public class TipoUsuarioDAO extends BaseDAO<TipoUsuario, Integer> {
         }
 
         return stats.toString();
+    }
+
+    // ✅ AGREGAR después del constructor:
+    @Override
+    protected boolean isNew(TipoUsuario entity) {
+        return entity.getId() == null;
     }
 }

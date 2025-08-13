@@ -5,6 +5,7 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * DAO para la entidad EsquemaVacunacion - VERSIÓN CORREGIDA
@@ -374,7 +375,7 @@ public class EsquemaVacunacionDAO extends BaseDAO<EsquemaVacunacion, Integer> {
         if (vacunasAplicadas != null && !vacunasAplicadas.isEmpty()) {
             esquemas = esquemas.stream()
                     .filter(e -> !vacunasAplicadas.contains(e.getVacunaId()))
-                    .toList();
+                    .collect(Collectors.toList()); // ✅ compatible con Java 8+
         }
 
         logger.debug("Vacunas pendientes para edad {} días: {}", edadDias, esquemas.size());
@@ -502,7 +503,7 @@ public class EsquemaVacunacionDAO extends BaseDAO<EsquemaVacunacion, Integer> {
         String edadTexto = convertirEdadATexto(edadDias);
 
         formato.append("VACUNAS PARA ").append(edadTexto.toUpperCase()).append("\n");
-        formato.append("=".repeat(40)).append("\n");
+        formato.append("========================================").append("\n");
 
         for (EsquemaVacunacion esquema : esquemas) {
             formato.append("• ").append(esquema.getVacunaNombre() != null ?

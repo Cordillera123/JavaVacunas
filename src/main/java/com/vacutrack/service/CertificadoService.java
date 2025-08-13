@@ -2,40 +2,35 @@ package com.vacutrack.service;
 
 import com.vacutrack.dao.*;
 import com.vacutrack.model.*;
-import com.vacutrack.util.DateUtil;
-import com.vacutrack.util.PDFUtil;
-import com.vacutrack.util.QRCodeUtil;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
- * Servicio de generación de certificados de vacunación
- * Maneja la creación de certificados oficiales en PDF con códigos QR,
- * validación digital y cumplimiento de estándares del MSP Ecuador
+ * Servicio SIMPLIFICADO de generación de certificados de vacunación
+ * Versión para estudiantes - sin complejidades innecesarias
+ * Genera carnets digitales simples en formato texto
  *
  * @author VACU-TRACK Team
- * @version 1.0
+ * @version 2.0 - Simplificado para estudiantes
  */
 public class CertificadoService {
 
     private static final Logger logger = LoggerFactory.getLogger(CertificadoService.class);
-    
+
     // Instancia singleton
     private static CertificadoService instance;
-    
-    // DAOs
+
+    // DAOs - SOLO los que realmente existen
     private final CertificadoVacunacionDAO certificadoDAO;
     private final NinoDAO ninoDAO;
     private final RegistroVacunaDAO registroVacunaDAO;
@@ -43,16 +38,13 @@ public class CertificadoService {
     private final PadreFamiliaDAO padreFamiliaDAO;
     private final CentroSaludDAO centroSaludDAO;
     private final ProfesionalEnfermeriaDAO profesionalDAO;
-    
-    // Servicios relacionados
-    private final VacunacionService vacunacionService;
-    
-    // Configuración de certificados
+    private final NotificacionDAO notificacionDAO;
+
+    // Configuración SIMPLIFICADA
     private static final String DIRECTORIO_CERTIFICADOS = "certificados/";
-    private static final String URL_BASE_VERIFICACION = "https://vacutrack.gob.ec/verificar/";
-    private static final String LOGO_MSP_PATH = "assets/logo_msp.png";
-    private static final String SELLO_DIGITAL_PATH = "assets/sello_digital.png";
-    
+    private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+    private static final DateTimeFormatter FORMATO_FECHA_HORA = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+
     /**
      * Constructor privado para patrón singleton
      */
@@ -64,12 +56,12 @@ public class CertificadoService {
         this.padreFamiliaDAO = PadreFamiliaDAO.getInstance();
         this.centroSaludDAO = CentroSaludDAO.getInstance();
         this.profesionalDAO = ProfesionalEnfermeriaDAO.getInstance();
-        this.vacunacionService = VacunacionService.getInstance();
-        
-        // Crear directorio de certificados si no existe
+        this.notificacionDAO = NotificacionDAO.getInstance();
+
+        // Crear directorio si no existe
         crearDirectorioCertificados();
     }
-    
+
     /**
      * Obtiene la instancia singleton del servicio
      * @return instancia de CertificadoService
@@ -80,243 +72,230 @@ public class CertificadoService {
         }
         return instance;
     }
-    
+
     /**
-     * Genera un certificado oficial de vacunación
+     * SIMPLIFICADO: Genera un certificado básico de vacunación
      * @param ninoId ID del niño
-     * @param solicitadoPor ID del usuario que solicita (padre o profesional)
-     * @param tipoSolicitud tipo de solicitud (COMPLETO, PARCIAL, INTERNACIONAL)
+     * @param usuarioSolicitante ID del usuario que solicita
      * @return resultado de la generación
      */
-    public CertificadoResult generarCertificado(Integer ninoId, Integer solicitadoPor, 
-                                              String tipoSolicitud) {
-        logger.info("Generando certificado para niño ID: {} - Tipo: {}", ninoId, tipoSolicitud);
-        
+    public CertificadoResult generarCertificado(Integer ninoId, Integer usuarioSolicitante) {
+        logger.info("Generando certificado para niño ID: {}", ninoId);
+
         try {
-            // Validar parámetros
-            if (ninoId == null || solicitadoPor == null) {
+            // Validar parámetros básicos
+            if (ninoId == null || usuarioSolicitante == null) {
                 return CertificadoResult.error("Parámetros requeridos faltantes");
             }
-            
+
             // Obtener información del niño
             Optional<Nino> ninoOpt = ninoDAO.findById(ninoId);
             if (ninoOpt.isEmpty()) {
                 return CertificadoResult.error("Niño no encontrado");
             }
-            
+
             Nino nino = ninoOpt.get();
-            
-            // Verificar permisos
-            if (!verificarPermisosCertificado(nino, solicitadoPor)) {
+
+            // Verificar permisos básicos
+            if (!verificarPermisosCertificado(nino, usuarioSolicitante)) {
                 return CertificadoResult.error("No tiene permisos para generar este certificado");
             }
-            
-            // Verificar si ya existe un certificado vigente reciente
-            Optional<CertificadoVacunacion> certificadoExistente = 
-                certificadoDAO.findVigentePorNino(ninoId);
-            
+
+            // Obtener registros de vacunación del niño
+            List<RegistroVacuna> registrosVacunas = registroVacunaDAO.findByNino(ninoId);
+
+            // Obtener notificaciones pendientes
+            List<Notificacion> notificacionesPendientes = notificacionDAO.getNotificacionesActivas(ninoId);
+
+            // Calcular porcentaje de completitud (simplificado)
+            BigDecimal porcentajeCompletitud = calcularPorcentajeCompletitud(registrosVacunas, nino);
+
+            // Verificar si ya existe un certificado vigente reciente (últimas 24 horas)
+            Optional<CertificadoVacunacion> certificadoExistente =
+                    certificadoDAO.getUltimoCertificado(ninoId);
+
             if (certificadoExistente.isPresent()) {
                 CertificadoVacunacion existente = certificadoExistente.get();
-                // Si fue generado en las últimas 24 horas, retornar el existente
-                if (existente.getFechaGeneracion().isAfter(LocalDateTime.now().minusHours(24))) {
+                if (existente.getVigente() &&
+                        existente.getFechaGeneracion().isAfter(LocalDateTime.now().minusHours(24))) {
                     logger.info("Retornando certificado existente para niño {}", ninoId);
                     return CertificadoResult.success(existente, "Certificado existente válido");
                 }
             }
-            
-            // Obtener historial de vacunación completo
-            HistorialVacunacion historial = vacunacionService.getHistorialVacunacion(ninoId);
-            if (historial == null) {
-                return CertificadoResult.error("Error al obtener historial de vacunación");
+
+            // Crear nuevo certificado
+            CertificadoVacunacion certificado = certificadoDAO.crearCertificado(ninoId, porcentajeCompletitud);
+            if (certificado == null) {
+                return CertificadoResult.error("Error al crear registro del certificado");
             }
-            
-            // Verificar completitud mínima para certificado oficial
-            if (historial.getEstadisticas().getPorcentajeCompletitud() < 
-                CertificadoVacunacion.PORCENTAJE_MINIMO_COMPLETO.doubleValue()) {
-                return CertificadoResult.warning(
-                    "El esquema de vacunación no alcanza el porcentaje mínimo para certificado oficial (" +
-                    CertificadoVacunacion.PORCENTAJE_MINIMO_COMPLETO + "%). " +
-                    "Se generará certificado parcial.");
+
+            // Cargar información completa
+            certificado.setNino(nino);
+            certificado.setRegistrosVacunas(registrosVacunas);
+            certificado.setNotificacionesPendientes(notificacionesPendientes);
+
+            // Generar archivo de texto simple
+            String rutaArchivo = generarArchivoTexto(certificado);
+            if (rutaArchivo != null) {
+                certificadoDAO.updateUrlArchivo(certificado.getId(), rutaArchivo);
+                certificado.setUrlArchivo(rutaArchivo);
             }
-            
-            // Crear registro del certificado
-            CertificadoVacunacion certificado = crearRegistroCertificado(nino, historial, tipoSolicitud);
-            
-            // Generar PDF del certificado
-            GeneracionPDFResult pdfResult = generarPDFCertificado(certificado, historial);
-            if (!pdfResult.isExitoso()) {
-                return CertificadoResult.error("Error al generar PDF: " + pdfResult.getError());
-            }
-            
-            // Actualizar certificado con información del archivo
-            certificado.setUrlArchivo(pdfResult.getRutaArchivo());
-            
-            // Invalidar certificados anteriores del mismo niño
-            invalidarCertificadosAnteriores(ninoId);
-            
-            // Guardar certificado en base de datos
-            if (!certificadoDAO.insert(certificado)) {
-                return CertificadoResult.error("Error al guardar certificado en base de datos");
-            }
-            
-            logger.info("Certificado generado exitosamente: {} para {}", 
-                certificado.getCodigoCertificado(), nino.getNombres() + " " + nino.getApellidos());
-            
+
+            // Invalidar certificados anteriores
+            invalidarCertificadosAnteriores(ninoId, certificado.getId());
+
+            logger.info("Certificado generado exitosamente: {} para {}",
+                    certificado.getCodigoCertificado(), nino.obtenerNombreCompleto());
+
             return CertificadoResult.success(certificado, "Certificado generado exitosamente");
-            
+
         } catch (Exception e) {
             logger.error("Error al generar certificado para niño: " + ninoId, e);
             return CertificadoResult.error("Error interno del sistema");
         }
     }
-    
+
     /**
-     * Verifica un certificado por su código QR o código de verificación
-     * @param codigoVerificacion código de verificación del certificado
+     * SIMPLIFICADO: Verifica un certificado por código
+     * @param codigoVerificacion código del certificado
      * @return resultado de la verificación
      */
     public VerificacionResult verificarCertificado(String codigoVerificacion) {
         logger.info("Verificando certificado con código: {}", codigoVerificacion);
-        
+
         try {
             if (codigoVerificacion == null || codigoVerificacion.trim().isEmpty()) {
                 return VerificacionResult.error("Código de verificación requerido");
             }
-            
+
             // Buscar certificado por código
-            Optional<CertificadoVacunacion> certificadoOpt = 
-                certificadoDAO.findByCodigoCertificado(codigoVerificacion.trim());
-            
+            Optional<CertificadoVacunacion> certificadoOpt =
+                    certificadoDAO.findByCodigo(codigoVerificacion.trim());
+
             if (certificadoOpt.isEmpty()) {
                 return VerificacionResult.error("Certificado no encontrado");
             }
-            
+
             CertificadoVacunacion certificado = certificadoOpt.get();
-            
+
             // Verificar vigencia
             if (!certificado.getVigente()) {
-                return VerificacionResult.error("Certificado no vigente o revocado");
+                return VerificacionResult.error("Certificado no vigente");
             }
-            
-            // Verificar fecha de emisión (máximo 1 año de antigüedad)
+
+            // Verificar antigüedad (máximo 1 año)
             if (certificado.getFechaGeneracion().isBefore(LocalDateTime.now().minusYears(1))) {
-                return VerificacionResult.warning("Certificado válido pero con más de 1 año de antigüedad");
+                return VerificacionResult.warning("Certificado válido pero antiguo (más de 1 año)");
             }
-            
-            // Obtener información completa del niño
+
+            // Obtener información del niño
             Optional<Nino> ninoOpt = ninoDAO.findById(certificado.getNinoId());
             if (ninoOpt.isEmpty()) {
                 return VerificacionResult.error("Información del niño no encontrada");
             }
-            
+
             Nino nino = ninoOpt.get();
-            
-            // Crear resultado de verificación
-            VerificacionResult result = VerificacionResult.success(certificado, 
-                "Certificado válido y vigente");
-            result.setNino(nino);
+            certificado.setNino(nino);
+
+            // Crear resultado exitoso
+            VerificacionResult result = VerificacionResult.success(certificado,
+                    "Certificado válido y vigente");
             result.setFechaVerificacion(LocalDateTime.now());
-            
-            // Obtener resumen de vacunas del certificado
-            ResumenVacunacion resumen = generarResumenVacunacion(certificado.getNinoId());
-            result.setResumenVacunacion(resumen);
-            
+
             logger.info("Verificación exitosa para certificado: {}", codigoVerificacion);
-            
             return result;
-            
+
         } catch (Exception e) {
             logger.error("Error al verificar certificado: " + codigoVerificacion, e);
             return VerificacionResult.error("Error interno del sistema");
         }
     }
-    
+
     /**
-     * Obtiene el archivo PDF de un certificado
-     * @param certificadoId ID del certificado
-     * @param usuarioId ID del usuario que solicita (para verificar permisos)
-     * @return datos del archivo PDF o null si no se encuentra
-     */
-    public byte[] obtenerPDFCertificado(Integer certificadoId, Integer usuarioId) {
-        logger.debug("Obteniendo PDF para certificado ID: {}", certificadoId);
-        
-        try {
-            Optional<CertificadoVacunacion> certificadoOpt = certificadoDAO.findById(certificadoId);
-            if (certificadoOpt.isEmpty()) {
-                return null;
-            }
-            
-            CertificadoVacunacion certificado = certificadoOpt.get();
-            
-            // Verificar permisos
-            Optional<Nino> ninoOpt = ninoDAO.findById(certificado.getNinoId());
-            if (ninoOpt.isEmpty()) {
-                return null;
-            }
-            
-            Nino nino = ninoOpt.get();
-            if (!verificarPermisosCertificado(nino, usuarioId)) {
-                logger.warn("Usuario {} sin permisos para acceder a certificado {}", 
-                    usuarioId, certificadoId);
-                return null;
-            }
-            
-            // Leer archivo PDF
-            String rutaArchivo = certificado.getUrlArchivo();
-            if (rutaArchivo == null || rutaArchivo.isEmpty()) {
-                return null;
-            }
-            
-            File archivo = new File(rutaArchivo);
-            if (!archivo.exists()) {
-                logger.warn("Archivo PDF no encontrado: {}", rutaArchivo);
-                return null;
-            }
-            
-            return java.nio.file.Files.readAllBytes(archivo.toPath());
-            
-        } catch (Exception e) {
-            logger.error("Error al obtener PDF del certificado: " + certificadoId, e);
-            return null;
-        }
-    }
-    
-    /**
-     * Lista certificados de un niño
+     * SIMPLIFICADO: Lista certificados de un niño
      * @param ninoId ID del niño
      * @param usuarioId ID del usuario que consulta
      * @return lista de certificados
      */
     public List<CertificadoVacunacion> listarCertificados(Integer ninoId, Integer usuarioId) {
         logger.debug("Listando certificados para niño ID: {}", ninoId);
-        
+
         try {
             // Verificar permisos
             Optional<Nino> ninoOpt = ninoDAO.findById(ninoId);
             if (ninoOpt.isEmpty()) {
                 return new ArrayList<>();
             }
-            
+
             Nino nino = ninoOpt.get();
             if (!verificarPermisosCertificado(nino, usuarioId)) {
                 return new ArrayList<>();
             }
-            
+
             List<CertificadoVacunacion> certificados = certificadoDAO.findByNino(ninoId);
-            
-            // Ordenar por fecha de generación (más reciente primero)
-            certificados.sort((a, b) -> b.getFechaGeneracion().compareTo(a.getFechaGeneracion()));
-            
+
+            // Cargar información básica del niño en cada certificado
+            for (CertificadoVacunacion cert : certificados) {
+                cert.setNino(nino);
+            }
+
             return certificados;
-            
+
         } catch (Exception e) {
             logger.error("Error al listar certificados para niño: " + ninoId, e);
             return new ArrayList<>();
         }
     }
-    
+
     /**
-     * Revoca un certificado (lo marca como no vigente)
+     * SIMPLIFICADO: Obtiene el contenido del certificado como texto
+     * @param certificadoId ID del certificado
+     * @param usuarioId ID del usuario que solicita
+     * @return contenido del certificado o null si no tiene acceso
+     */
+    public String obtenerContenidoCertificado(Integer certificadoId, Integer usuarioId) {
+        logger.debug("Obteniendo contenido para certificado ID: {}", certificadoId);
+
+        try {
+            Optional<CertificadoVacunacion> certificadoOpt = certificadoDAO.findById(certificadoId);
+            if (certificadoOpt.isEmpty()) {
+                return null;
+            }
+
+            CertificadoVacunacion certificado = certificadoOpt.get();
+
+            // Verificar permisos
+            Optional<Nino> ninoOpt = ninoDAO.findById(certificado.getNinoId());
+            if (ninoOpt.isEmpty()) {
+                return null;
+            }
+
+            Nino nino = ninoOpt.get();
+            if (!verificarPermisosCertificado(nino, usuarioId)) {
+                logger.warn("Usuario {} sin permisos para acceder a certificado {}",
+                        usuarioId, certificadoId);
+                return null;
+            }
+
+            // Cargar información completa
+            certificado.setNino(nino);
+            List<RegistroVacuna> registros = registroVacunaDAO.findByNino(nino.getId());
+            certificado.setRegistrosVacunas(registros);
+
+            List<Notificacion> notificaciones = notificacionDAO.getNotificacionesActivas(nino.getId());
+            certificado.setNotificacionesPendientes(notificaciones);
+
+            // Generar contenido completo
+            return generarContenidoCompleto(certificado);
+
+        } catch (Exception e) {
+            logger.error("Error al obtener contenido del certificado: " + certificadoId, e);
+            return null;
+        }
+    }
+
+    /**
+     * SIMPLIFICADO: Revoca un certificado
      * @param certificadoId ID del certificado
      * @param usuarioId ID del usuario que revoca
      * @param motivo motivo de la revocación
@@ -324,245 +303,354 @@ public class CertificadoService {
      */
     public boolean revocarCertificado(Integer certificadoId, Integer usuarioId, String motivo) {
         logger.info("Revocando certificado ID: {} por usuario: {}", certificadoId, usuarioId);
-        
+
         try {
             Optional<CertificadoVacunacion> certificadoOpt = certificadoDAO.findById(certificadoId);
             if (certificadoOpt.isEmpty()) {
                 return false;
             }
-            
-            CertificadoVacunacion certificado = certificadoOpt.get();
-            
-            // Solo profesionales pueden revocar certificados
-            // Aquí se podría agregar verificación de rol
-            
-            certificado.setVigente(false);
-            // Se podría agregar un campo para el motivo de revocación
-            
-            boolean revocado = certificadoDAO.update(certificado);
-            
+
+            // Solo profesionales o administradores pueden revocar
+            // (Se podría agregar verificación de rol aquí)
+
+            boolean revocado = certificadoDAO.invalidarCertificado(certificadoId);
+
             if (revocado) {
-                logger.info("Certificado {} revocado exitosamente. Motivo: {}", 
-                    certificado.getCodigoCertificado(), motivo);
+                logger.info("Certificado {} revocado exitosamente. Motivo: {}",
+                        certificadoOpt.get().getCodigoCertificado(), motivo);
             }
-            
+
             return revocado;
-            
+
         } catch (Exception e) {
             logger.error("Error al revocar certificado: " + certificadoId, e);
             return false;
         }
     }
-    
-    // Métodos privados de utilidad
-    
+
+    // Métodos privados de utilidad - SIMPLIFICADOS
+
     /**
-     * Verifica permisos para generar/acceder certificados
+     * Verifica permisos básicos para certificados
      */
     private boolean verificarPermisosCertificado(Nino nino, Integer usuarioId) {
         try {
             // El padre del niño siempre tiene permisos
-            if (nino.getPadreFamiliaId() != null) {
-                Optional<PadreFamilia> padreOpt = padreFamiliaDAO.findById(nino.getPadreFamiliaId());
-                if (padreOpt.isPresent() && padreOpt.get().getUsuarioId().equals(usuarioId)) {
+            if (nino.getPadreId() != null) {
+                Optional<PadreFamilia> padreOpt = padreFamiliaDAO.findById(nino.getPadreId());
+                if (padreOpt.isPresent() &&
+                        Objects.equals(padreOpt.get().getUsuarioId(), usuarioId)) {
                     return true;
                 }
             }
-            
+
             // Los profesionales de enfermería tienen permisos
             Optional<ProfesionalEnfermeria> profesionalOpt = profesionalDAO.findByUsuarioId(usuarioId);
             if (profesionalOpt.isPresent()) {
                 return true;
             }
-            
-            // Otros casos se pueden agregar aquí (administradores, etc.)
-            
+
+            // Aquí se podrían agregar más verificaciones (administradores, etc.)
+
             return false;
-            
+
         } catch (Exception e) {
             logger.error("Error al verificar permisos de certificado", e);
             return false;
         }
     }
-    
+
     /**
-     * Crea el registro inicial del certificado
+     * SIMPLIFICADO: Calcula porcentaje de completitud básico
      */
-    private CertificadoVacunacion crearRegistroCertificado(Nino nino, HistorialVacunacion historial, 
-                                                         String tipoSolicitud) {
-        CertificadoVacunacion certificado = new CertificadoVacunacion();
-        
-        certificado.setNinoId(nino.getId());
-        certificado.setNino(nino);
-        
-        // Generar código único del certificado
-        String codigoCertificado = generarCodigoCertificado(nino);
-        certificado.setCodigoCertificado(codigoCertificado);
-        
-        certificado.setFechaGeneracion(LocalDateTime.now());
-        
-        // Calcular porcentaje de completitud
-        BigDecimal porcentaje = BigDecimal.valueOf(historial.getEstadisticas().getPorcentajeCompletitud());
-        certificado.setPorcentajeCompletitud(porcentaje);
-        
-        certificado.setVigente(true);
-        
-        // Asignar las listas de registros y notificaciones
-        certificado.setRegistrosVacunas(historial.getVacunasAplicadas());
-        
-        // Convertir VacunaPendiente a Notificacion para el certificado
-        List<Notificacion> notificacionesPendientes = historial.getVacunasPendientes().stream()
-            .map(this::convertirVacunaPendienteANotificacion)
-            .collect(Collectors.toList());
-        certificado.setNotificacionesPendientes(notificacionesPendientes);
-        
-        return certificado;
+    private BigDecimal calcularPorcentajeCompletitud(List<RegistroVacuna> registros, Nino nino) {
+        if (registros == null || registros.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+
+        // Lógica simplificada: contar dosis únicas aplicadas
+        Set<String> vacunasUnicas = new HashSet<>();
+        for (RegistroVacuna registro : registros) {
+            if (registro.getVacunaId() != null) {
+                String key = registro.getVacunaId() + "-" +
+                        (registro.getNumeroDosis() != null ? registro.getNumeroDosis() : 1);
+                vacunasUnicas.add(key);
+            }
+        }
+
+        // Esquema básico ecuatoriano: aproximadamente 20 dosis hasta los 18 meses
+        int totalEsperado = calcularVacunasEsperadasPorEdad(nino);
+
+        if (totalEsperado == 0) {
+            return BigDecimal.ZERO;
+        }
+
+        BigDecimal porcentaje = BigDecimal.valueOf(vacunasUnicas.size())
+                .multiply(BigDecimal.valueOf(100))
+                .divide(BigDecimal.valueOf(totalEsperado), 2, BigDecimal.ROUND_HALF_UP);
+
+        // No puede ser mayor a 100%
+        return porcentaje.compareTo(BigDecimal.valueOf(100)) > 0 ?
+                BigDecimal.valueOf(100) : porcentaje;
     }
-    
+
     /**
-     * Genera un código único para el certificado
+     * Calcula vacunas esperadas según la edad (simplificado)
      */
-    private String generarCodigoCertificado(Nino nino) {
-        // Formato: CERT-VACU-YYYYMMDD-NNNN
-        String fechaStr = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        
-        // Generar número secuencial del día
-        long certificadosHoy = certificadoDAO.countByFecha(LocalDate.now());
-        int numeroSecuencial = (int) (certificadosHoy + 1);
-        
-        return String.format(CertificadoVacunacion.FORMATO_CODIGO, fechaStr, numeroSecuencial);
+    private int calcularVacunasEsperadasPorEdad(Nino nino) {
+        if (nino.getFechaNacimiento() == null) {
+            return 20; // Valor por defecto
+        }
+
+        long edadEnDias = nino.calcularEdadEnDias();
+
+        // Cálculo simplificado basado en el esquema ecuatoriano
+        if (edadEnDias < 60) {
+            return 2; // BCG, HB(0)
+        } else if (edadEnDias < 120) {
+            return 7; // + vacunas de 2 meses
+        } else if (edadEnDias < 180) {
+            return 12; // + vacunas de 4 meses
+        } else if (edadEnDias < 365) {
+            return 17; // + vacunas de 6 meses
+        } else if (edadEnDias < 540) {
+            return 19; // + vacunas de 12 meses
+        } else {
+            return 21; // Esquema completo hasta 18 meses
+        }
     }
-    
+
     /**
-     * Genera el PDF del certificado
+     * SIMPLIFICADO: Genera archivo de texto plano del certificado
      */
-    private GeneracionPDFResult generarPDFCertificado(CertificadoVacunacion certificado, 
-                                                     HistorialVacunacion historial) {
+    private String generarArchivoTexto(CertificadoVacunacion certificado) {
         try {
-            // Crear nombre de archivo único
-            String nombreArchivo = String.format("certificado_%s_%s.pdf", 
-                certificado.getCodigoCertificado(),
-                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")));
-            
+            String nombreArchivo = String.format("certificado_%s_%s.txt",
+                    certificado.getCodigoCertificado(),
+                    LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")));
+
             String rutaCompleta = DIRECTORIO_CERTIFICADOS + nombreArchivo;
-            
-            // Generar contenido del PDF
-            byte[] pdfBytes = crearContenidoPDF(certificado, historial);
-            
-            // Guardar archivo
-            try (FileOutputStream fos = new FileOutputStream(rutaCompleta)) {
-                fos.write(pdfBytes);
+
+            String contenido = generarContenidoCompleto(certificado);
+
+            try (FileWriter writer = new FileWriter(rutaCompleta)) {
+                writer.write(contenido);
             }
-            
-            return GeneracionPDFResult.success(rutaCompleta);
-            
-        } catch (Exception e) {
-            logger.error("Error al generar PDF del certificado", e);
-            return GeneracionPDFResult.error("Error al generar PDF: " + e.getMessage());
+
+            return rutaCompleta;
+
+        } catch (IOException e) {
+            logger.error("Error al generar archivo de certificado", e);
+            return null;
         }
     }
-    
+
     /**
-     * Crea el contenido PDF del certificado
+     * SIMPLIFICADO: Genera el contenido completo del certificado
      */
-    private byte[] crearContenidoPDF(CertificadoVacunacion certificado, HistorialVacunacion historial) 
-            throws IOException {
-        
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        
-        // Aquí se usaría una librería como iText o Apache PDFBox
-        // Por simplicidad, creamos un PDF básico
-        
-        // Header del documento
+    private String generarContenidoCompleto(CertificadoVacunacion certificado) {
         StringBuilder contenido = new StringBuilder();
-        contenido.append("REPÚBLICA DEL ECUADOR\n");
-        contenido.append("MINISTERIO DE SALUD PÚBLICA\n");
-        contenido.append("CERTIFICADO OFICIAL DE VACUNACIÓN\n\n");
-        
+
+        // Encabezado
+        contenido.append("╔══════════════════════════════════════════════════════════╗\n");
+        contenido.append("║              CERTIFICADO DE VACUNACIÓN                   ║\n");
+        contenido.append("║                    VACU-TRACK                           ║\n");
+        contenido.append("║              Sistema de Seguimiento                     ║\n");
+        contenido.append("╚══════════════════════════════════════════════════════════╝\n\n");
+
         // Información del certificado
-        contenido.append("Código de Certificado: ").append(certificado.getCodigoCertificado()).append("\n");
-        contenido.append("Fecha de Emisión: ").append(
-            certificado.getFechaGeneracion().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))).append("\n\n");
-        
+        contenido.append("INFORMACIÓN DEL CERTIFICADO\n");
+        contenido.append("═══════════════════════════\n");
+        contenido.append("Código: ").append(certificado.getCodigoCertificado()).append("\n");
+        contenido.append("Fecha de emisión: ").append(
+                certificado.getFechaGeneracion().format(FORMATO_FECHA_HORA)).append("\n");
+        contenido.append("Estado: ").append(certificado.getVigente() ? "VIGENTE" : "NO VIGENTE").append("\n");
+        contenido.append("Completitud: ").append(certificado.getPorcentajeCompletitud()).append("%\n\n");
+
         // Información del niño
-        Nino nino = certificado.getNino();
-        contenido.append("DATOS DEL MENOR\n");
-        contenido.append("Nombres: ").append(nino.getNombres()).append("\n");
-        contenido.append("Apellidos: ").append(nino.getApellidos()).append("\n");
-        contenido.append("Cédula/Identificación: ").append(nino.getCedula() != null ? nino.getCedula() : "N/A").append("\n");
-        contenido.append("Fecha de Nacimiento: ").append(
-            DateUtil.formatearFecha(nino.getFechaNacimiento())).append("\n");
-        contenido.append("Género: ").append(nino.getGenero()).append("\n\n");
-        
-        // Estadísticas de vacunación
-        contenido.append("ESTADO DE VACUNACIÓN\n");
-        contenido.append("Porcentaje de Completitud: ").append(
-            String.format("%.1f%%", certificado.getPorcentajeCompletitud())).append("\n");
-        contenido.append("Total de Vacunas Aplicadas: ").append(
-            historial.getEstadisticas().getTotalAplicadas()).append("\n\n");
-        
-        // Lista de vacunas aplicadas
-        contenido.append("VACUNAS APLICADAS\n");
-        contenido.append("%-30s %-12s %-20s %-15s\n").formatted("Vacuna", "Fecha", "Centro de Salud", "Lote");
-        contenido.append("-".repeat(80)).append("\n");
-        
-        for (RegistroVacuna registro : historial.getVacunasAplicadas()) {
-            String nombreVacuna = obtenerNombreVacuna(registro.getVacunaId());
-            String fechaAplicacion = DateUtil.formatearFecha(registro.getFechaAplicacion());
-            String centroSalud = obtenerNombreCentroSalud(registro.getCentroSaludId());
-            String lote = registro.getLote() != null ? registro.getLote() : "N/A";
-            
-            contenido.append("%-30s %-12s %-20s %-15s\n").formatted(
-                nombreVacuna.length() > 29 ? nombreVacuna.substring(0, 29) : nombreVacuna,
-                fechaAplicacion,
-                centroSalud.length() > 19 ? centroSalud.substring(0, 19) : centroSalud,
-                lote
-            );
-        }
-        
-        // Vacunas pendientes
-        if (!historial.getVacunasPendientes().isEmpty()) {
-            contenido.append("\n\nVACUNAS PENDIENTES\n");
-            for (VacunacionService.VacunaPendiente pendiente : historial.getVacunasPendientes()) {
-                contenido.append("- ").append(pendiente.getVacunaNombre())
-                    .append(" (Recomendada: ").append(DateUtil.formatearFecha(pendiente.getFechaRecomendada()))
-                    .append(")\n");
+        if (certificado.getNino() != null) {
+            Nino nino = certificado.getNino();
+            contenido.append("INFORMACIÓN DEL PACIENTE\n");
+            contenido.append("════════════════════════\n");
+            contenido.append("Nombre completo: ").append(nino.obtenerNombreCompleto()).append("\n");
+
+            if (nino.getCedula() != null) {
+                contenido.append("Cédula: ").append(nino.getCedula()).append("\n");
             }
+
+            contenido.append("Fecha nacimiento: ").append(
+                    nino.getFechaNacimiento().format(FORMATO_FECHA)).append("\n");
+            contenido.append("Edad actual: ").append(nino.obtenerEdadFormateada()).append("\n");
+            contenido.append("Sexo: ").append(nino.obtenerSexoLegible()).append("\n");
+
+            if (nino.getLugarNacimiento() != null) {
+                contenido.append("Lugar nacimiento: ").append(nino.getLugarNacimiento()).append("\n");
+            }
+
+            // Información del padre/representante
+            if (nino.getPadre() != null) {
+                PadreFamilia padre = nino.getPadre();
+                contenido.append("Representante: ").append(padre.obtenerNombreCompleto());
+                if (padre.obtenerCedula() != null) {
+                    contenido.append(" (CI: ").append(padre.obtenerCedula()).append(")");
+                }
+                contenido.append("\n");
+
+                if (padre.getTelefono() != null) {
+                    contenido.append("Teléfono: ").append(padre.getTelefono()).append("\n");
+                }
+            }
+
+            contenido.append("\n");
         }
-        
-        // Footer con código QR y validación
-        contenido.append("\n\n");
-        contenido.append("VALIDACIÓN DIGITAL\n");
-        contenido.append("Código de Verificación: ").append(certificado.getCodigoCertificado()).append("\n");
-        contenido.append("URL de Verificación: ").append(URL_BASE_VERIFICACION)
-            .append(certificado.getCodigoCertificado()).append("\n");
-        contenido.append("\nEste certificado es válido únicamente con el código QR y puede ser verificado en línea.\n");
-        contenido.append("Documento generado automáticamente por el Sistema VACU-TRACK del MSP Ecuador.\n");
-        
-        // Por simplicidad, convertimos el texto a bytes
-        // En una implementación real, se usaría una librería PDF completa
-        return contenido.toString().getBytes("UTF-8");
+
+        // Vacunas aplicadas
+        contenido.append("VACUNAS APLICADAS\n");
+        contenido.append("═════════════════\n");
+
+        if (certificado.getRegistrosVacunas() != null && !certificado.getRegistrosVacunas().isEmpty()) {
+            contenido.append(String.format("%-25s %-8s %-12s %-20s %-10s%n",
+                    "VACUNA", "DOSIS", "FECHA", "CENTRO", "LOTE"));
+            contenido.append("─".repeat(80)).append("\n");
+
+            for (RegistroVacuna registro : certificado.getRegistrosVacunas()) {
+                String nombreVacuna = obtenerNombreVacuna(registro.getVacunaId());
+                String fecha = registro.getFechaAplicacion() != null ?
+                        registro.getFechaAplicacion().format(FORMATO_FECHA) : "N/A";
+                String centro = obtenerNombreCentroSalud(registro.getCentroSaludId());
+                String lote = registro.getLoteVacuna() != null ? registro.getLoteVacuna() : "N/A";
+
+                contenido.append(String.format("%-25s %-8s %-12s %-20s %-10s%n",
+                        truncar(nombreVacuna, 24),
+                        registro.getNumeroDosis() != null ? registro.getNumeroDosis() : "1",
+                        fecha,
+                        truncar(centro, 19),
+                        truncar(lote, 9)
+                ));
+
+                // Agregar nota de reacción adversa si la hubo
+                if (registro.tuvoReaccionAdversa() && registro.getDescripcionReaccion() != null) {
+                    contenido.append("    ⚠️ Reacción: ").append(registro.getDescripcionReaccion()).append("\n");
+                }
+            }
+        } else {
+            contenido.append("No hay vacunas registradas.\n");
+        }
+
+        contenido.append("\n");
+
+        // Vacunas pendientes
+        contenido.append("VACUNAS PENDIENTES\n");
+        contenido.append("══════════════════\n");
+
+        if (certificado.getNotificacionesPendientes() != null &&
+                !certificado.getNotificacionesPendientes().isEmpty()) {
+
+            boolean hayPendientes = false;
+            for (Notificacion notificacion : certificado.getNotificacionesPendientes()) {
+                if (notificacion.debeSerMostrada() && !notificacion.fueAplicada()) {
+                    if (!hayPendientes) {
+                        contenido.append(String.format("%-25s %-8s %-12s %-15s%n",
+                                "VACUNA", "DOSIS", "FECHA PROG.", "ESTADO"));
+                        contenido.append("─".repeat(65)).append("\n");
+                        hayPendientes = true;
+                    }
+
+                    String nombreVacuna = obtenerNombreVacuna(notificacion.getVacunaId());
+                    String fechaProg = notificacion.getFechaProgramada() != null ?
+                            notificacion.getFechaProgramada().format(FORMATO_FECHA) : "N/A";
+                    String estado = notificacion.getTipoNotificacion();
+
+                    contenido.append(String.format("%-25s %-8s %-12s %-15s%n",
+                            truncar(nombreVacuna, 24),
+                            notificacion.getNumeroDosis() != null ? notificacion.getNumeroDosis() : "1",
+                            fechaProg,
+                            truncar(estado, 14)
+                    ));
+                }
+            }
+
+            if (!hayPendientes) {
+                contenido.append("¡Felicitaciones! No hay vacunas pendientes.\n");
+            }
+        } else {
+            contenido.append("No hay información de vacunas pendientes.\n");
+        }
+
+        contenido.append("\n");
+
+        // Pie del certificado
+        contenido.append("VALIDACIÓN\n");
+        contenido.append("══════════\n");
+        contenido.append("Código de verificación: ").append(certificado.getCodigoCertificado()).append("\n");
+        contenido.append("Este certificado es válido y ha sido generado automáticamente\n");
+        contenido.append("por el sistema VACU-TRACK.\n");
+        contenido.append("\n");
+        contenido.append("Fecha de generación: ").append(LocalDateTime.now().format(FORMATO_FECHA_HORA)).append("\n");
+        contenido.append("Quito, Ecuador\n");
+        contenido.append("\n");
+        contenido.append("╔══════════════════════════════════════════════════════════╗\n");
+        contenido.append("║  Este documento es válido únicamente con el código       ║\n");
+        contenido.append("║  de verificación y puede ser validado en línea.         ║\n");
+        contenido.append("╚══════════════════════════════════════════════════════════╝\n");
+
+        return contenido.toString();
     }
-    
+
+    /**
+     * Obtiene nombre de vacuna por ID
+     */
+    private String obtenerNombreVacuna(Integer vacunaId) {
+        if (vacunaId == null) return "Vacuna desconocida";
+
+        try {
+            Optional<Vacuna> vacunaOpt = vacunaDAO.findById(vacunaId);
+            return vacunaOpt.map(Vacuna::obtenerNombreDisplay).orElse("Vacuna ID " + vacunaId);
+        } catch (Exception e) {
+            return "Vacuna ID " + vacunaId;
+        }
+    }
+
+    /**
+     * Obtiene nombre de centro de salud por ID
+     */
+    private String obtenerNombreCentroSalud(Integer centroId) {
+        if (centroId == null) return "Centro desconocido";
+
+        try {
+            Optional<CentroSalud> centroOpt = centroSaludDAO.findById(centroId);
+            return centroOpt.map(CentroSalud::getNombre).orElse("Centro ID " + centroId);
+        } catch (Exception e) {
+            return "Centro ID " + centroId;
+        }
+    }
+
+    /**
+     * Trunca texto para que quepa en columnas
+     */
+    private String truncar(String texto, int maxLength) {
+        if (texto == null) return "";
+        return texto.length() > maxLength ? texto.substring(0, maxLength) : texto;
+    }
+
     /**
      * Invalida certificados anteriores del mismo niño
      */
-    private void invalidarCertificadosAnteriores(Integer ninoId) {
+    private void invalidarCertificadosAnteriores(Integer ninoId, Integer certificadoActualId) {
         try {
             List<CertificadoVacunacion> certificadosAnteriores = certificadoDAO.findByNino(ninoId);
-            
+
             for (CertificadoVacunacion anterior : certificadosAnteriores) {
-                if (anterior.getVigente()) {
-                    anterior.setVigente(false);
-                    certificadoDAO.update(anterior);
+                if (!Objects.equals(anterior.getId(), certificadoActualId) && anterior.getVigente()) {
+                    certificadoDAO.invalidarCertificado(anterior.getId());
                 }
             }
-            
+
         } catch (Exception e) {
             logger.error("Error al invalidar certificados anteriores", e);
         }
     }
-    
+
     /**
      * Crea directorio de certificados si no existe
      */
@@ -571,77 +659,15 @@ public class CertificadoService {
             File directorio = new File(DIRECTORIO_CERTIFICADOS);
             if (!directorio.exists()) {
                 directorio.mkdirs();
+                logger.info("Directorio de certificados creado: {}", DIRECTORIO_CERTIFICADOS);
             }
         } catch (Exception e) {
             logger.error("Error al crear directorio de certificados", e);
         }
     }
-    
-    /**
-     * Genera resumen de vacunación para verificación
-     */
-    private ResumenVacunacion generarResumenVacunacion(Integer ninoId) {
-        try {
-            VacunacionService.EstadoEsquema estado = vacunacionService.verificarEstadoEsquema(ninoId);
-            List<RegistroVacuna> aplicadas = registroVacunaDAO.findByNino(ninoId);
-            
-            ResumenVacunacion resumen = new ResumenVacunacion();
-            resumen.setTotalVacunasAplicadas(aplicadas.size());
-            resumen.setPorcentajeCompletitud(estado != null ? estado.getPorcentajeCompletitud() : 0.0);
-            resumen.setVacunasVencidas(estado != null ? estado.getVacunasVencidas() : 0);
-            resumen.setUltimaVacunaFecha(aplicadas.stream()
-                .map(RegistroVacuna::getFechaAplicacion)
-                .max(LocalDate::compareTo)
-                .orElse(null));
-            
-            return resumen;
-            
-        } catch (Exception e) {
-            logger.error("Error al generar resumen de vacunación", e);
-            return new ResumenVacunacion();
-        }
-    }
-    
-    /**
-     * Convierte VacunaPendiente a Notificacion para el certificado
-     */
-    private Notificacion convertirVacunaPendienteANotificacion(VacunacionService.VacunaPendiente pendiente) {
-        Notificacion notificacion = new Notificacion();
-        notificacion.setVacunaId(pendiente.getVacunaId());
-        notificacion.setTipoNotificacion("VACUNA_PENDIENTE");
-        notificacion.setTitulo("Vacuna Pendiente: " + pendiente.getVacunaNombre());
-        notificacion.setMensaje("Fecha recomendada: " + DateUtil.formatearFecha(pendiente.getFechaRecomendada()));
-        notificacion.setFechaProgramada(pendiente.getFechaRecomendada().atStartOfDay());
-        notificacion.setEstado("PENDIENTE");
-        return notificacion;
-    }
-    
-    /**
-     * Obtiene nombre de vacuna por ID
-     */
-    private String obtenerNombreVacuna(Integer vacunaId) {
-        try {
-            Optional<Vacuna> vacunaOpt = vacunaDAO.findById(vacunaId);
-            return vacunaOpt.map(Vacuna::getNombre).orElse("Vacuna ID " + vacunaId);
-        } catch (Exception e) {
-            return "Vacuna ID " + vacunaId;
-        }
-    }
-    
-    /**
-     * Obtiene nombre de centro de salud por ID
-     */
-    private String obtenerNombreCentroSalud(Integer centroId) {
-        try {
-            Optional<CentroSalud> centroOpt = centroSaludDAO.findById(centroId);
-            return centroOpt.map(CentroSalud::getNombre).orElse("Centro ID " + centroId);
-        } catch (Exception e) {
-            return "Centro ID " + centroId;
-        }
-    }
-    
-    // Clases para resultados
-    
+
+    // Clases para resultados - SIMPLIFICADAS
+
     /**
      * Resultado de generación de certificado
      */
@@ -650,34 +676,37 @@ public class CertificadoService {
         private final String message;
         private final String level;
         private final CertificadoVacunacion certificado;
-        
-        private CertificadoResult(boolean success, String message, String level, 
-                                CertificadoVacunacion certificado) {
+
+        private CertificadoResult(boolean success, String message, String level,
+                                  CertificadoVacunacion certificado) {
             this.success = success;
             this.message = message;
             this.level = level;
             this.certificado = certificado;
         }
-        
+
         public static CertificadoResult success(CertificadoVacunacion certificado, String message) {
             return new CertificadoResult(true, message, "SUCCESS", certificado);
         }
-        
+
         public static CertificadoResult warning(String message) {
             return new CertificadoResult(true, message, "WARNING", null);
         }
-        
+
         public static CertificadoResult error(String message) {
             return new CertificadoResult(false, message, "ERROR", null);
         }
-        
+
         // Getters
         public boolean isSuccess() { return success; }
         public String getMessage() { return message; }
         public String getLevel() { return level; }
         public CertificadoVacunacion getCertificado() { return certificado; }
+
+        public boolean isWarning() { return "WARNING".equals(level); }
+        public boolean isError() { return "ERROR".equals(level); }
     }
-    
+
     /**
      * Resultado de verificación de certificado
      */
@@ -686,87 +715,252 @@ public class CertificadoService {
         private final String mensaje;
         private final String nivel;
         private final CertificadoVacunacion certificado;
-        private Nino nino;
         private LocalDateTime fechaVerificacion;
-        private ResumenVacunacion resumenVacunacion;
-        
-        private VerificacionResult(boolean valido, String mensaje, String nivel, 
-                                 CertificadoVacunacion certificado) {
+
+        private VerificacionResult(boolean valido, String mensaje, String nivel,
+                                   CertificadoVacunacion certificado) {
             this.valido = valido;
             this.mensaje = mensaje;
             this.nivel = nivel;
             this.certificado = certificado;
         }
-        
+
         public static VerificacionResult success(CertificadoVacunacion certificado, String mensaje) {
             return new VerificacionResult(true, mensaje, "SUCCESS", certificado);
         }
-        
+
         public static VerificacionResult warning(String mensaje) {
             return new VerificacionResult(true, mensaje, "WARNING", null);
         }
-        
+
         public static VerificacionResult error(String mensaje) {
             return new VerificacionResult(false, mensaje, "ERROR", null);
         }
-        
+
         // Getters y Setters
         public boolean isValido() { return valido; }
         public String getMensaje() { return mensaje; }
         public String getNivel() { return nivel; }
         public CertificadoVacunacion getCertificado() { return certificado; }
-        public Nino getNino() { return nino; }
-        public void setNino(Nino nino) { this.nino = nino; }
         public LocalDateTime getFechaVerificacion() { return fechaVerificacion; }
-        public void setFechaVerificacion(LocalDateTime fechaVerificacion) { this.fechaVerificacion = fechaVerificacion; }
-        public ResumenVacunacion getResumenVacunacion() { return resumenVacunacion; }
-        public void setResumenVacunacion(ResumenVacunacion resumenVacunacion) { this.resumenVacunacion = resumenVacunacion; }
+        public void setFechaVerificacion(LocalDateTime fechaVerificacion) {
+            this.fechaVerificacion = fechaVerificacion;
+        }
+
+        public boolean isWarning() { return "WARNING".equals(nivel); }
+        public boolean isError() { return "ERROR".equals(nivel); }
     }
-    
+
+    // Métodos de utilidad adicionales
+
     /**
-     * Resultado de generación de PDF
+     * Obtiene estadísticas simples de certificados
+     * @return String con estadísticas básicas
      */
-    private static class GeneracionPDFResult {
-        private final boolean exitoso;
-        private final String rutaArchivo;
-        private final String error;
-        
-        private GeneracionPDFResult(boolean exitoso, String rutaArchivo, String error) {
-            this.exitoso = exitoso;
-            this.rutaArchivo = rutaArchivo;
-            this.error = error;
+    public String obtenerEstadisticasCertificados() {
+        try {
+            StringBuilder stats = new StringBuilder();
+
+            long totalCertificados = certificadoDAO.count();
+            long certificadosVigentes = certificadoDAO.countVigentes();
+            long certificadosNoVigentes = certificadoDAO.countNoVigentes();
+
+            stats.append("ESTADÍSTICAS DE CERTIFICADOS\n");
+            stats.append("============================\n");
+            stats.append("Total certificados emitidos: ").append(totalCertificados).append("\n");
+            stats.append("Certificados vigentes: ").append(certificadosVigentes).append("\n");
+            stats.append("Certificados revocados: ").append(certificadosNoVigentes).append("\n");
+
+            // Porcentaje de vigencia
+            if (totalCertificados > 0) {
+                double porcentajeVigencia = (certificadosVigentes * 100.0) / totalCertificados;
+                stats.append("Porcentaje de vigencia: ").append(String.format("%.1f%%", porcentajeVigencia)).append("\n");
+            }
+
+            // Certificados completos (100% de vacunas)
+            List<CertificadoVacunacion> certificadosCompletos = certificadoDAO.findCertificadosCompletos();
+            stats.append("Certificados completos (100%): ").append(certificadosCompletos.size()).append("\n");
+
+            return stats.toString();
+
+        } catch (Exception e) {
+            logger.error("Error al obtener estadísticas de certificados", e);
+            return "Error al obtener estadísticas";
         }
-        
-        public static GeneracionPDFResult success(String rutaArchivo) {
-            return new GeneracionPDFResult(true, rutaArchivo, null);
-        }
-        
-        public static GeneracionPDFResult error(String error) {
-            return new GeneracionPDFResult(false, null, error);
-        }
-        
-        public boolean isExitoso() { return exitoso; }
-        public String getRutaArchivo() { return rutaArchivo; }
-        public String getError() { return error; }
     }
-    
+
     /**
-     * Resumen de vacunación para verificación
+     * Obtiene certificados recientes (últimos 30 días)
+     * @param limite número máximo de certificados a retornar
+     * @return lista de certificados recientes
      */
-    public static class ResumenVacunacion {
-        private int totalVacunasAplicadas;
-        private double porcentajeCompletitud;
-        private int vacunasVencidas;
-        private LocalDate ultimaVacunaFecha;
-        
-        // Getters y Setters
-        public int getTotalVacunasAplicadas() { return totalVacunasAplicadas; }
-        public void setTotalVacunasAplicadas(int totalVacunasAplicadas) { this.totalVacunasAplicadas = totalVacunasAplicadas; }
-        public double getPorcentajeCompletitud() { return porcentajeCompletitud; }
-        public void setPorcentajeCompletitud(double porcentajeCompletitud) { this.porcentajeCompletitud = porcentajeCompletitud; }
-        public int getVacunasVencidas() { return vacunasVencidas; }
-        public void setVacunasVencidas(int vacunasVencidas) { this.vacunasVencidas = vacunasVencidas; }
-        public LocalDate getUltimaVacunaFecha() { return ultimaVacunaFecha; }
-        public void setUltimaVacunaFecha(LocalDate ultimaVacunaFecha) { this.ultimaVacunaFecha = ultimaVacunaFecha; }
+    public List<CertificadoVacunacion> obtenerCertificadosRecientes(int limite) {
+        try {
+            LocalDateTime fechaLimite = LocalDateTime.now().minusDays(30);
+            List<CertificadoVacunacion> certificados = certificadoDAO.findByFechaRange(
+                    fechaLimite, LocalDateTime.now());
+
+            // Limitar resultados
+            if (limite > 0 && certificados.size() > limite) {
+                certificados = certificados.subList(0, limite);
+            }
+
+            // Cargar información básica del niño
+            for (CertificadoVacunacion cert : certificados) {
+                Optional<Nino> ninoOpt = ninoDAO.findById(cert.getNinoId());
+                ninoOpt.ifPresent(cert::setNino);
+            }
+
+            return certificados;
+
+        } catch (Exception e) {
+            logger.error("Error al obtener certificados recientes", e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Busca certificados por nombre del niño
+     * @param nombreNino nombre del niño (búsqueda parcial)
+     * @param usuarioId ID del usuario que busca (para verificar permisos)
+     * @return lista de certificados encontrados
+     */
+    public List<CertificadoVacunacion> buscarCertificadosPorNombre(String nombreNino, Integer usuarioId) {
+        try {
+            if (nombreNino == null || nombreNino.trim().isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            // Buscar niños por nombre
+            List<Nino> ninos = ninoDAO.searchByName(nombreNino);
+            List<CertificadoVacunacion> certificadosPermitidos = new ArrayList<>();
+
+            for (Nino nino : ninos) {
+                // Verificar permisos para cada niño
+                if (verificarPermisosCertificado(nino, usuarioId)) {
+                    List<CertificadoVacunacion> certificadosNino = certificadoDAO.findByNino(nino.getId());
+                    for (CertificadoVacunacion cert : certificadosNino) {
+                        cert.setNino(nino);
+                        certificadosPermitidos.add(cert);
+                    }
+                }
+            }
+
+            // Ordenar por fecha de generación (más recientes primero)
+            certificadosPermitidos.sort((a, b) ->
+                    b.getFechaGeneracion().compareTo(a.getFechaGeneracion()));
+
+            return certificadosPermitidos;
+
+        } catch (Exception e) {
+            logger.error("Error al buscar certificados por nombre: " + nombreNino, e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Valida si un certificado puede ser generado para un niño
+     * @param ninoId ID del niño
+     * @return resultado de la validación
+     */
+    public CertificadoResult validarGeneracionCertificado(Integer ninoId) {
+        try {
+            if (ninoId == null) {
+                return CertificadoResult.error("ID del niño es requerido");
+            }
+
+            // Verificar que el niño existe
+            Optional<Nino> ninoOpt = ninoDAO.findById(ninoId);
+            if (ninoOpt.isEmpty()) {
+                return CertificadoResult.error("Niño no encontrado");
+            }
+
+            Nino nino = ninoOpt.get();
+
+            // Verificar que el niño está activo
+            if (!nino.getActivo()) {
+                return CertificadoResult.error("El niño no está activo en el sistema");
+            }
+
+            // Verificar que tiene al menos una vacuna registrada
+            List<RegistroVacuna> registros = registroVacunaDAO.findByNino(ninoId);
+            if (registros.isEmpty()) {
+                return CertificadoResult.warning("El niño no tiene vacunas registradas. " +
+                        "Se generará un certificado en blanco.");
+            }
+
+            // Verificar edad razonable para vacunación (menor a 18 años)
+            long edadEnDias = nino.calcularEdadEnDias();
+            if (edadEnDias > 365 * 18) {
+                return CertificadoResult.warning("El niño tiene más de 18 años. " +
+                        "Verifique si aún requiere el esquema de vacunación infantil.");
+            }
+
+            return CertificadoResult.success(null, "El certificado puede ser generado");
+
+        } catch (Exception e) {
+            logger.error("Error al validar generación de certificado para niño: " + ninoId, e);
+            return CertificadoResult.error("Error interno del sistema");
+        }
+    }
+
+    /**
+     * Regenera un certificado existente (actualiza porcentajes y datos)
+     * @param certificadoId ID del certificado a regenerar
+     * @param usuarioId ID del usuario que solicita
+     * @return resultado de la regeneración
+     */
+    public CertificadoResult regenerarCertificado(Integer certificadoId, Integer usuarioId) {
+        try {
+            // Obtener certificado existente
+            Optional<CertificadoVacunacion> certificadoOpt = certificadoDAO.findById(certificadoId);
+            if (certificadoOpt.isEmpty()) {
+                return CertificadoResult.error("Certificado no encontrado");
+            }
+
+            CertificadoVacunacion certificadoExistente = certificadoOpt.get();
+
+            // Verificar permisos
+            Optional<Nino> ninoOpt = ninoDAO.findById(certificadoExistente.getNinoId());
+            if (ninoOpt.isEmpty()) {
+                return CertificadoResult.error("Niño no encontrado");
+            }
+
+            Nino nino = ninoOpt.get();
+            if (!verificarPermisosCertificado(nino, usuarioId)) {
+                return CertificadoResult.error("No tiene permisos para regenerar este certificado");
+            }
+
+            // Actualizar datos del certificado
+            List<RegistroVacuna> registrosActuales = registroVacunaDAO.findByNino(nino.getId());
+            BigDecimal nuevoPorcentaje = calcularPorcentajeCompletitud(registrosActuales, nino);
+
+            // Actualizar porcentaje en la base de datos
+            certificadoDAO.updatePorcentajeCompletitud(certificadoId, nuevoPorcentaje);
+            certificadoExistente.setPorcentajeCompletitud(nuevoPorcentaje);
+
+            // Cargar información completa
+            certificadoExistente.setNino(nino);
+            certificadoExistente.setRegistrosVacunas(registrosActuales);
+
+            List<Notificacion> notificaciones = notificacionDAO.getNotificacionesActivas(nino.getId());
+            certificadoExistente.setNotificacionesPendientes(notificaciones);
+
+            // Regenerar archivo
+            String nuevaRuta = generarArchivoTexto(certificadoExistente);
+            if (nuevaRuta != null) {
+                certificadoDAO.updateUrlArchivo(certificadoId, nuevaRuta);
+                certificadoExistente.setUrlArchivo(nuevaRuta);
+            }
+
+            logger.info("Certificado regenerado: {} para {}",
+                    certificadoExistente.getCodigoCertificado(), nino.obtenerNombreCompleto());
+
+            return CertificadoResult.success(certificadoExistente, "Certificado regenerado exitosamente");
+
+        } catch (Exception e) {
+            logger.error("Error al regenerar certificado: " + certificadoId, e);
+            return CertificadoResult.error("Error interno del sistema");
+        }
     }
 }

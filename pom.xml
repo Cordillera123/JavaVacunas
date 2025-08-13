@@ -12,7 +12,7 @@
     <version>1.0-SNAPSHOT</version>
     <packaging>war</packaging>
 
-    <n>VACU-TRACK</n>
+    <name>VACU-TRACK</name>
     <description>Sistema de Seguimiento de Vacunación Infantil</description>
 
     <!-- Propiedades del Proyecto -->
@@ -25,7 +25,8 @@
         <jsp.version>2.3.3</jsp.version>
         <jstl.version>1.2</jstl.version>
         <mysql.version>8.0.33</mysql.version>
-        <itext.version>5.5.13.3</itext.version>
+        <!-- ACTUALIZADO: iText 7 en lugar de iText 5 -->
+        <itext.version>7.2.5</itext.version>
         <jackson.version>2.15.2</jackson.version>
         <bcrypt.version>0.10.2</bcrypt.version>
         <commons.lang.version>3.12.0</commons.lang.version>
@@ -70,10 +71,31 @@
         </dependency>
 
         <!-- ===== PDF GENERATION ===== -->
-        <!-- iText para generar certificados PDF -->
+        <!-- ACTUALIZADO: iText 7 Core (nuevo) -->
         <dependency>
             <groupId>com.itextpdf</groupId>
-            <artifactId>itextpdf</artifactId>
+            <artifactId>itext7-core</artifactId>
+            <version>${itext.version}</version>
+        </dependency>
+
+        <!-- iText 7 Layout (para elementos avanzados) -->
+        <dependency>
+            <groupId>com.itextpdf</groupId>
+            <artifactId>layout</artifactId>
+            <version>${itext.version}</version>
+        </dependency>
+
+        <!-- iText 7 Kernel (para funciones básicas) -->
+        <dependency>
+            <groupId>com.itextpdf</groupId>
+            <artifactId>kernel</artifactId>
+            <version>${itext.version}</version>
+        </dependency>
+
+        <!-- iText 7 IO (para manejo de archivos) -->
+        <dependency>
+            <groupId>com.itextpdf</groupId>
+            <artifactId>io</artifactId>
             <version>${itext.version}</version>
         </dependency>
 
@@ -124,6 +146,14 @@
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
             <version>${logback.version}</version>
+        </dependency>
+
+        <!-- ===== TESTING (opcional) ===== -->
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.2</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

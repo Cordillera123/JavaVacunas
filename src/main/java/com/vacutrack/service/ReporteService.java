@@ -15,10 +15,11 @@ import java.util.*;
 
 /**
  * Servicio simplificado de reportes para VACU-TRACK
+ * CORREGIDO - Solo usa métodos que existen en los DAOs
  * Versión estudiantil con funciones básicas esenciales
  *
  * @author VACU-TRACK Team
- * @version 1.0 (Simplificado)
+ * @version 1.1 (Corregido)
  */
 public class ReporteService {
 
@@ -70,12 +71,12 @@ public class ReporteService {
             DashboardBasico dashboard = new DashboardBasico();
             dashboard.setFechaGeneracion(LocalDateTime.now());
 
-            // Indicadores básicos
-            dashboard.setTotalNinos(ninoDAO.countActivos());
-            dashboard.setTotalVacunasAplicadas(registroVacunaDAO.countTotal());
-            dashboard.setCentrosActivos(centroSaludDAO.countActivos());
-            dashboard.setProfesionalesActivos(profesionalDAO.countActivos());
-            dashboard.setPadresRegistrados(padreFamiliaDAO.countActivos());
+            // Indicadores básicos usando métodos que SÍ existen
+            dashboard.setTotalNinos((int) ninoDAO.count());
+            dashboard.setTotalVacunasAplicadas((int) registroVacunaDAO.count());
+            dashboard.setCentrosActivos((int) centroSaludDAO.count());
+            dashboard.setProfesionalesActivos((int) profesionalDAO.count());
+            dashboard.setPadresRegistrados((int) padreFamiliaDAO.count());
 
             // Calcular cobertura general
             double coberturaGeneral = calcularCoberturaGeneral();
@@ -130,14 +131,16 @@ public class ReporteService {
 
         try {
             // Obtener datos del niño
-            Nino nino = ninoDAO.findById(ninoId);
-            if (nino == null) {
+            Optional<Nino> ninoOpt = ninoDAO.findById(ninoId);
+            if (ninoOpt.isEmpty()) {
                 logger.warn("Niño no encontrado: {}", ninoId);
                 return null;
             }
 
+            Nino nino = ninoOpt.get();
+
             // Obtener registros de vacunas
-            List<RegistroVacuna> registros = registroVacunaDAO.findByNinoId(ninoId);
+            List<RegistroVacuna> registros = registroVacunaDAO.findByNino(ninoId);
 
             // Crear certificado
             CertificadoVacunacion certificado = new CertificadoVacunacion();
@@ -167,11 +170,11 @@ public class ReporteService {
         try {
             EstadisticasBasicas stats = new EstadisticasBasicas();
 
-            // Conteos básicos
-            stats.setTotalNinos(ninoDAO.countActivos());
-            stats.setTotalVacunas(vacunaDAO.countActivas());
-            stats.setTotalCentros(centroSaludDAO.countActivos());
-            stats.setTotalRegistros(registroVacunaDAO.countTotal());
+            // Conteos básicos usando métodos que SÍ existen
+            stats.setTotalNinos((int) ninoDAO.count());
+            stats.setTotalVacunas((int) vacunaDAO.countActiveVaccines());
+            stats.setTotalCentros((int) centroSaludDAO.count());
+            stats.setTotalRegistros((int) registroVacunaDAO.count());
 
             // Porcentajes básicos
             double coberturaGeneral = calcularCoberturaGeneral();
@@ -196,11 +199,19 @@ public class ReporteService {
      */
     private double calcularCoberturaGeneral() {
         try {
-            int totalNinos = ninoDAO.countActivos();
-            if (totalNinos == 0) return 0.0;
+            List<Nino> todosNinos = ninoDAO.findActiveNinos();
+            if (todosNinos.isEmpty()) return 0.0;
 
-            int ninosConAlgunaVacuna = registroVacunaDAO.countNinosUnicos();
-            return (double) ninosConAlgunaVacuna / totalNinos * 100.0;
+            // Contar niños que tienen al menos una vacuna
+            int ninosConVacunas = 0;
+            for (Nino nino : todosNinos) {
+                List<RegistroVacuna> registros = registroVacunaDAO.findByNino(nino.getId());
+                if (!registros.isEmpty()) {
+                    ninosConVacunas++;
+                }
+            }
+
+            return (double) ninosConVacunas / todosNinos.size() * 100.0;
 
         } catch (Exception e) {
             logger.error("Error al calcular cobertura general", e);
@@ -215,15 +226,24 @@ public class ReporteService {
         List<CoberturaVacuna> coberturas = new ArrayList<>();
 
         try {
-            List<Vacuna> vacunas = vacunaDAO.findActivas();
-            int totalNinos = ninoDAO.countActivos();
+            List<Vacuna> vacunas = vacunaDAO.findActiveVaccines();
+            List<Nino> todosNinos = ninoDAO.findActiveNinos();
+            int totalNinos = todosNinos.size();
 
             for (Vacuna vacuna : vacunas) {
                 CoberturaVacuna cobertura = new CoberturaVacuna();
                 cobertura.setVacunaId(vacuna.getId());
                 cobertura.setVacunaNombre(vacuna.getNombre());
 
-                int ninosVacunados = registroVacunaDAO.countNinosVacunadosPorVacuna(vacuna.getId());
+                // Contar niños vacunados para esta vacuna
+                int ninosVacunados = 0;
+                for (Nino nino : todosNinos) {
+                    List<RegistroVacuna> registros = registroVacunaDAO.findByNinoAndVacuna(nino.getId(), vacuna.getId());
+                    if (!registros.isEmpty()) {
+                        ninosVacunados++;
+                    }
+                }
+
                 cobertura.setNinosVacunados(ninosVacunados);
                 cobertura.setTotalNinos(totalNinos);
 
@@ -248,18 +268,23 @@ public class ReporteService {
         List<CoberturaCentro> coberturas = new ArrayList<>();
 
         try {
-            List<CentroSalud> centros = centroSaludDAO.findActivos();
+            List<CentroSalud> centros = centroSaludDAO.findActive();
 
             for (CentroSalud centro : centros) {
                 CoberturaCentro cobertura = new CoberturaCentro();
                 cobertura.setCentroId(centro.getId());
                 cobertura.setCentroNombre(centro.getNombre());
 
-                int vacunasAplicadas = registroVacunaDAO.countByCentro(centro.getId());
-                cobertura.setVacunasAplicadas(vacunasAplicadas);
+                // Contar vacunas aplicadas en este centro
+                List<RegistroVacuna> registrosCentro = registroVacunaDAO.findByCentroSalud(centro.getId());
+                cobertura.setVacunasAplicadas(registrosCentro.size());
 
-                int ninosAtendidos = registroVacunaDAO.countNinosUnicosByCentro(centro.getId());
-                cobertura.setNinosAtendidos(ninosAtendidos);
+                // Contar niños únicos atendidos
+                Set<Integer> ninosUnicos = new HashSet<>();
+                for (RegistroVacuna registro : registrosCentro) {
+                    ninosUnicos.add(registro.getNinoId());
+                }
+                cobertura.setNinosAtendidos(ninosUnicos.size());
 
                 coberturas.add(cobertura);
             }
@@ -282,7 +307,7 @@ public class ReporteService {
         Map<String, Integer> porGrupoEdad = new HashMap<>();
 
         try {
-            List<Nino> ninos = ninoDAO.findActivos();
+            List<Nino> ninos = ninoDAO.findActiveNinos();
             LocalDate hoy = LocalDate.now();
 
             for (Nino nino : ninos) {
@@ -308,9 +333,9 @@ public class ReporteService {
         Map<String, Integer> distribucion = new HashMap<>();
 
         try {
-            List<Nino> ninos = ninoDAO.findActivos();
+            List<Nino> ninos = ninoDAO.findActiveNinos();
             for (Nino nino : ninos) {
-                String genero = nino.getSexo();
+                String genero = nino.getSexo() != null ? nino.getSexo() : "No especificado";
                 distribucion.merge(genero, 1, Integer::sum);
             }
         } catch (Exception e) {
@@ -329,6 +354,84 @@ public class ReporteService {
         if (edadMeses < 24) return "Niños pequeños (1-2 años)";
         if (edadMeses < 60) return "Preescolares (2-5 años)";
         return "Escolares (5+ años)";
+    }
+
+    /**
+     * Obtiene resumen de vacunación de un niño específico
+     */
+    public ResumenVacunacionNino obtenerResumenNino(Integer ninoId) {
+        if (ninoId == null) {
+            return null;
+        }
+
+        try {
+            Optional<Nino> ninoOpt = ninoDAO.findById(ninoId);
+            if (ninoOpt.isEmpty()) {
+                return null;
+            }
+
+            Nino nino = ninoOpt.get();
+            List<RegistroVacuna> registros = registroVacunaDAO.findByNino(ninoId);
+
+            ResumenVacunacionNino resumen = new ResumenVacunacionNino();
+            resumen.setNino(nino);
+            resumen.setTotalVacunasAplicadas(registros.size());
+            resumen.setRegistros(registros);
+
+            // Calcular porcentaje de completitud básico
+            List<Vacuna> todasVacunas = vacunaDAO.findActiveVaccines();
+            Set<Integer> vacunasUnicas = new HashSet<>();
+            for (RegistroVacuna registro : registros) {
+                vacunasUnicas.add(registro.getVacunaId());
+            }
+
+            double porcentaje = todasVacunas.isEmpty() ? 0.0 :
+                    (vacunasUnicas.size() * 100.0) / todasVacunas.size();
+            resumen.setPorcentajeCompletitud(porcentaje);
+
+            return resumen;
+
+        } catch (Exception e) {
+            logger.error("Error al obtener resumen de vacunación para niño: " + ninoId, e);
+            return null;
+        }
+    }
+
+    /**
+     * Obtiene lista de vacunas vencidas en el sistema
+     */
+    public List<VacunaVencida> obtenerVacunasVencidas() {
+        List<VacunaVencida> vencidas = new ArrayList<>();
+
+        try {
+            List<Nino> ninos = ninoDAO.findActiveNinos();
+            List<Vacuna> vacunas = vacunaDAO.findActiveVaccines();
+            LocalDate hoy = LocalDate.now();
+
+            for (Nino nino : ninos) {
+                for (Vacuna vacuna : vacunas) {
+                    // Lógica simplificada: asumir que las vacunas se deben aplicar
+                    // según la edad del niño (esto sería más complejo con el esquema real)
+                    int edadDias = (int) ChronoUnit.DAYS.between(nino.getFechaNacimiento(), hoy);
+
+                    // Verificar si ya tiene la vacuna
+                    List<RegistroVacuna> registros = registroVacunaDAO.findByNinoAndVacuna(nino.getId(), vacuna.getId());
+
+                    if (registros.isEmpty() && edadDias > 365) { // Ejemplo: después de 1 año sin vacuna
+                        VacunaVencida vencida = new VacunaVencida();
+                        vencida.setNino(nino);
+                        vencida.setVacuna(vacuna);
+                        vencida.setDiasVencida(edadDias - 365);
+                        vencidas.add(vencida);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            logger.error("Error al obtener vacunas vencidas", e);
+        }
+
+        return vencidas;
     }
 
     // ============= CLASES INTERNAS SIMPLIFICADAS =============
@@ -486,5 +589,42 @@ public class ReporteService {
         public void setRegistros(List<RegistroVacuna> registros) { this.registros = registros; }
         public LocalDateTime getFechaGeneracion() { return fechaGeneracion; }
         public void setFechaGeneracion(LocalDateTime fechaGeneracion) { this.fechaGeneracion = fechaGeneracion; }
+    }
+
+    /**
+     * Resumen de vacunación de un niño
+     */
+    public static class ResumenVacunacionNino {
+        private Nino nino;
+        private int totalVacunasAplicadas;
+        private double porcentajeCompletitud;
+        private List<RegistroVacuna> registros;
+
+        // Getters y Setters
+        public Nino getNino() { return nino; }
+        public void setNino(Nino nino) { this.nino = nino; }
+        public int getTotalVacunasAplicadas() { return totalVacunasAplicadas; }
+        public void setTotalVacunasAplicadas(int totalVacunasAplicadas) { this.totalVacunasAplicadas = totalVacunasAplicadas; }
+        public double getPorcentajeCompletitud() { return porcentajeCompletitud; }
+        public void setPorcentajeCompletitud(double porcentajeCompletitud) { this.porcentajeCompletitud = porcentajeCompletitud; }
+        public List<RegistroVacuna> getRegistros() { return registros; }
+        public void setRegistros(List<RegistroVacuna> registros) { this.registros = registros; }
+    }
+
+    /**
+     * Vacuna vencida
+     */
+    public static class VacunaVencida {
+        private Nino nino;
+        private Vacuna vacuna;
+        private int diasVencida;
+
+        // Getters y Setters
+        public Nino getNino() { return nino; }
+        public void setNino(Nino nino) { this.nino = nino; }
+        public Vacuna getVacuna() { return vacuna; }
+        public void setVacuna(Vacuna vacuna) { this.vacuna = vacuna; }
+        public int getDiasVencida() { return diasVencida; }
+        public void setDiasVencida(int diasVencida) { this.diasVencida = diasVencida; }
     }
 }

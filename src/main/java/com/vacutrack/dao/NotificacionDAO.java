@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors; // ✅ Import necesario para Collectors
 
 /**
  * DAO para la entidad Notificacion - VERSIÓN CORREGIDA
@@ -532,6 +533,11 @@ public class NotificacionDAO extends BaseDAO<Notificacion, Integer> {
      * @param ninoId ID del niño
      * @return lista de notificaciones activas
      */
+    /**
+     * Obtiene notificaciones activas (no leídas ni aplicadas)
+     * @param ninoId ID del niño
+     * @return lista de notificaciones activas
+     */
     public List<Notificacion> getNotificacionesActivas(Integer ninoId) {
         if (ninoId == null) {
             return List.of();
@@ -540,7 +546,7 @@ public class NotificacionDAO extends BaseDAO<Notificacion, Integer> {
         List<Notificacion> todas = findByNino(ninoId);
         return todas.stream()
                 .filter(n -> ESTADO_PENDIENTE.equals(n.getEstado()) || ESTADO_ENVIADA.equals(n.getEstado()))
-                .toList();
+                .collect(Collectors.toList()); // ✅ Compatible con Java 8+
     }
 
     /**
